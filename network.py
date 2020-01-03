@@ -1,17 +1,22 @@
-import socket
 import re
+import socket
+import urllib.parse as up
+
+import utils as u
 
 
 class Network:
-    def __init__(self, host, protocol):
+    def __init__(self, host, protocol, port, args):
         self.sock = socket.socket()
         self.host = host
         self.proto = protocol
-        self.addr = ('', 80)
+        self.port = port
+        self.args = args
+        self.addr = ()
 
     def try_getaddrinfo(self):
         try:
-            self.addr = socket.getaddrinfo(self.host, self.proto,
+            self.addr = socket.getaddrinfo(self.host, self.port,
                                            socket.AF_INET,
                                            socket.SOCK_STREAM)[0][4]
         except Exception:
@@ -28,61 +33,60 @@ class Network:
         return True
 
     def send_request(self, path):
-        self.sock.send(f"GET {path} HTTP/1.1 \r\n".encode('utf-8'))
-        self.sock.send(b"Accept: */* \r\n")
-        self.sock.send(b"Accept-Language: " +
-                       b"ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7 \r\n")
-        self.sock.send(b"User-Agent: Mozilla/5.0 (Windows NT 6.1) " +
-                       b"AppleWebKit/537.36 (KHTML, like Gecko) " +
-                       b"Chrome/54.0.2840.71 Safari/537.36 \r\n")
-        self.sock.send(b'Connection: keep-alive \r\n')
-        self.sock.send(f'Host: {self.host} \r\n'.encode('utf-8'))
-        self.sock.send(b"\r\n")
-
-    @staticmethod
-    def get_content_start(header_with_content):
-        try:
-            content_index = header_with_content.lower().index(
-                '<!doctype')
-        except ValueError:
-            try:
-                content_index = header_with_content.lower().index(
-                    '<html')
-            except ValueError:
-                content_index = 0
-
-        return content_index
+        connection = 'keep-alive' if self.args.keep else 'close'
+        headers = [f"GET {path} HTTP/1.1",
+                   "Accept: */*",
+                   "Accept-Language: ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                   f"User-Agent: {self.args.agent}",
+                   f"Connection: {connection}",
+                   f'Host: {self.host}']
+        user_headers = u.Utils.get_headers(self.args.headers)
+        headers[len(headers):] = user_headers
+        headers.append('\r\n')
+        self.sock.sendall(up.unquote_to_bytes(" \r\n".join(headers)))
 
     def recv_request(self):
-        data = b''
-        recv_data = self.sock.recv(1024)
+        headers = {}
+        page = []
 
-        content_len_search = re.search(r'Content-Length: (\d+)',
-                                       recv_data.decode('utf-8'))
+        with self.sock.makefile('rb') as socket_file:
+            socket_file.readline()
+            for line in socket_file:
+                decoded_line = line.decode('utf-8')
+                if decoded_line.strip() == '':
+                    break
+                typ = decoded_line[0:decoded_line.index(':')]
+                value = decoded_line[decoded_line.index(':') + 2:]
+                headers[typ] = value.strip()
 
-        content_index = Network.get_content_start(recv_data.decode('utf-8'))
-        if content_len_search is not None:
-            content_length = int(content_len_search[1])
+            if ('Content-type' in headers and
+                    'image' in headers['Content-type']):
+                if self.args.load:
+                    with open(self.args.load, 'wb') as f:
+                        for line in socket_file:
+                            f.write(line)
+                    return ''
 
-            if content_length == 0:
-                content_index = len(recv_data)
-            else:
-                content_length += content_index - len(recv_data)
-        else:
-            content_length = 65535
+                buffer = []
+                for line in socket_file:
+                    buffer.append(line)
 
-        data += (recv_data[content_index:]
-                 + self.recv_length_bytes(content_length))
+                return b''.join(buffer)
 
-        return data.decode('utf-8')
+            encod = 'utf-8'
+            if ('Content-type' in headers and
+                    'charset' in headers['Content-type']):
+                encod = re.match(r'.+charset=(.+)', headers['Content-type'])[1]
 
-    def recv_length_bytes(self, length):
-        recv_count = 0
-        data = b''
+            if 'Content-Length' in headers:
+                return socket_file.read(int(
+                    headers['Content-Length'])).decode(encod)
 
-        while recv_count < length:
-            recv_data = self.sock.recv(length)
-            recv_count += len(recv_data)
-            data += recv_data
+            try:
+                for line in socket_file:
+                    page.append(line.decode(encoding=encod))
+            except socket.timeout:
+                if len(page) == 0:
+                    raise TimeoutError
 
-        return data
+        return ''.join(page)
