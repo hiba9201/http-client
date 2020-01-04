@@ -1,49 +1,85 @@
 #!/usr/bin/env python3
-
+import argparse
 import sys
 
 import network
 import utils as u
 
 
+def create_args():
+    parser = argparse.ArgumentParser(description='''Python3.7 implementation of 
+                                     http client. Read "README.md" for more 
+                                     information''')
+    parser.add_argument('url', type=str, help='Url for request')
+    parser.add_argument('-a', '--agent', type=str,
+                        default="Shartrash",
+                        dest='agent', action='store',
+                        help='change User-Agent header value')
+    parser.add_argument('-n', '--no-keep-alive', default=False,
+                        dest='no_keep', action='store_true',
+                        help='''make connection header value
+                        "close" instead of "keep-alive"''')
+    parser.add_argument('-o', '--output', type=str, dest='output',
+                        action='store',
+                        help='load image to <LOAD> file if got one')
+    parser.add_argument('-d', '--headers', type=str, dest='headers',
+                        action='store', help='''add user headers to request 
+                        from <HEADERS> file''')
+    parser.add_argument('-c', '--host', type=str, default=None, dest='host',
+                        action='store', help='''specifies custom host for 
+                        request''')
+    parser.add_argument('-m', '--method', type=str, dest='method',
+                        action='store', default='GET',
+                        help='''request method, GET by default 
+                        (others are not implemented)''')
+    parser.add_argument('-r', '--no-redirects', action='store_true',
+                        default=False, dest='no_redirects',
+                        help='switch off redirecting')
+    parser.add_argument('-x', '--max-redirects', action='store', type=int,
+                        dest='max_redirects', default=sys.maxsize,
+                        help='set maximum count of redirects')
+
+    return parser.parse_args()
+
+
 def main():
-    args = u.Utils.create_args()
+    args = create_args()
 
-    line_parser = u.Utils.parse_url(args.url)
+    parsed_line = u.parse_url(args.url)
 
-    if not line_parser['host']:
-        sys.stderr.write(f'Url "{args.url}" is not valid\n')
-        sys.exit(4)
-
-    if line_parser['proto'] != 'http':
-        sys.stderr.write(
-            f'Protocol "{line_parser["proto"]}" is not supported :(\n')
+    if not parsed_line['host']:
+        print(f'Url "{args.url}" is not valid\n')
         sys.exit(1)
 
-    net = network.Network(line_parser['host'], line_parser['proto'],
-                          line_parser['port'], args)
-
-    if not net.try_getaddrinfo():
-        sys.stderr.write(f'Could not resolve host "{line_parser["host"]}"\n')
+    if parsed_line['proto'] not in ('http', 'https'):
+        print(f'Protocol "{parsed_line["proto"]}" is not supported :(\n',
+              file=sys.stderr)
         sys.exit(2)
 
+    net = network.Network(parsed_line['host'], parsed_line['proto'],
+                          parsed_line['port'], args)
+
     if net.try_connect_to_host():
-        net.send_request(line_parser["path"])
+        net.send_request(parsed_line["path"])
     else:
-        sys.stderr.write(
-            f'Could not connect to host "{line_parser["host"]}"\n')
+        print(f'Could not connect to host "{parsed_line["host"]}"\n',
+              file=sys.stderr)
         sys.exit(3)
 
     try:
-        result = net.recv_request()
+        result = net.recv_response()
     except TimeoutError:
-        sys.stderr.write('Receive timed out\n')
-        sys.exit(5)
+        print('Receive timed out\n', file=sys.stderr)
+        sys.exit(4)
     except OSError:
-        sys.stderr.write('Unable to write file\n')
-        sys.exit(6)
+        print('Unable to write file\n', file=sys.stderr)
+        sys.exit(5)
+    except network.NonSuccessfulResponse as e:
+        print(f"Response wasn't successful: {e}", file=sys.stderr)
+        sys.exit(net.response_code)
 
-    print(result)
+    if not args.output:
+        print(result)
 
 
 if __name__ == '__main__':
