@@ -6,6 +6,13 @@ import network
 import utils as u
 
 
+URL_NOT_VALID = 1
+NOT_SUPPORTED_PROTO = 2
+CONNECTION_ERROR = 3
+TIMEOUT_ERROR = 4
+FILE_ERROR = 5
+
+
 def create_args():
     parser = argparse.ArgumentParser(description='''Python3.7 implementation of 
                                      http client. Read "README.md" for more 
@@ -49,12 +56,12 @@ def main():
 
     if not parsed_line['host']:
         print(f'Url "{args.url}" is not valid\n')
-        sys.exit(1)
+        sys.exit(URL_NOT_VALID)
 
     if parsed_line['proto'] not in ('http', 'https'):
         print(f'Protocol "{parsed_line["proto"]}" is not supported :(\n',
               file=sys.stderr)
-        sys.exit(2)
+        sys.exit(NOT_SUPPORTED_PROTO)
 
     net = network.Network(parsed_line['host'], parsed_line['proto'],
                           parsed_line['port'], args)
@@ -64,16 +71,16 @@ def main():
     else:
         print(f'Could not connect to host "{parsed_line["host"]}"\n',
               file=sys.stderr)
-        sys.exit(3)
+        sys.exit(CONNECTION_ERROR)
 
     try:
         result = net.recv_response()
     except TimeoutError:
         print('Receive timed out\n', file=sys.stderr)
-        sys.exit(4)
+        sys.exit(TIMEOUT_ERROR)
     except OSError:
         print('Unable to write file\n', file=sys.stderr)
-        sys.exit(5)
+        sys.exit(FILE_ERROR)
     except network.NonSuccessfulResponse as e:
         print(f"Response wasn't successful: {e}", file=sys.stderr)
         sys.exit(net.response_code)
