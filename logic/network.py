@@ -1,14 +1,11 @@
+import gzip
 import re
 import socket
-import sys
 import urllib.parse as up
 import ssl
 
-import utils as u
-
-
-class NonSuccessfulResponse(Exception):
-    pass
+from logic import errors as e
+from logic import utils as u
 
 
 class Network:
@@ -24,17 +21,12 @@ class Network:
         self.addr = ()
         self.response_code = 0
 
-    def try_connect_to_host(self):
-        try:
-            self.sock.connect((self.host, int(self.port)))
-            if self.proto == 'https':
-                context = ssl.create_default_context()
-                self.sock = context.wrap_socket(self.sock,
-                                                server_hostname=self.host)
-        except Exception:
-            return False
-
-        return True
+    def connect_to_host(self):
+        self.sock.connect((self.host, int(self.port)))
+        if self.proto == 'https':
+            context = ssl.create_default_context()
+            self.sock = context.wrap_socket(self.sock,
+                                            server_hostname=self.host)
 
     def send_request(self, path):
         connection = 'close' if self.args.no_keep else 'keep-alive'
@@ -69,29 +61,25 @@ class Network:
                 headers[typ.lower()] = value.lower().strip()
 
             if (code.startswith('3') and not self.args.no_redirects and
-                    Network.REDIRECTS < self.args.max_redirects):
+                    Network.REDIRECTS < self.args.max_redirects and
+                    'location' in headers):
                 Network.REDIRECTS += 1
 
                 parsed_url = u.parse_url(headers['location'])
                 if parsed_url['proto'] not in ('http', 'https'):
-                    print(f'Protocol "{parsed_url["proto"]}" is not supported :(\n',
-                          file=sys.stderr)
-                    sys.exit(2)
+                    raise e.ProtocolError(parsed_url['proto'])
+
                 net = Network(parsed_url['host'],
                               parsed_url['proto'],
                               parsed_url['port'], self.args)
 
-                if net.try_connect_to_host():
-                    net.send_request(parsed_url["path"])
-                else:
-                    print(
-                        f'Could not connect to host "{parsed_url["host"]}"\n',
-                        file=sys.stderr)
-                    sys.exit(3)
+                net.connect_to_host()
+                net.send_request(parsed_url["path"])
+
                 return net.recv_response()
 
             if code != '200':
-                raise NonSuccessfulResponse(f'{code} {msg.strip()}')
+                raise e.NonSuccessfulResponse(f'{code} {msg.strip()}')
 
             if 'content-length' in headers:
                 page = socket_file.read(int(
@@ -107,14 +95,17 @@ class Network:
 
                 page = b''.join(buffer)
 
-            if self.args.output:
-                with open(self.args.output, 'wb') as f:
-                    f.write(page)
+        if self.args.output:
+            with open(self.args.output, 'wb') as f:
+                f.write(page)
 
-                return
+            return
 
-            if 'text' not in headers.get('content-type', ''):
-                return page
+        if 'text' not in headers.get('content-type', ''):
+            return page
+
+        if headers.get('content-encoding', '') == 'gzip':
+            page = gzip.decompress(page)
 
         encod = 'utf-8'
         if 'charset' in headers.get('content-type', ''):

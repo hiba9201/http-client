@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+import socket
 
-import network
-import utils as u
+from logic import errors as e
+from logic import network
+from logic import utils as u
 
 
 URL_NOT_VALID = 1
@@ -19,7 +21,7 @@ def create_args():
                                      information''')
     parser.add_argument('url', type=str, help='Url for request')
     parser.add_argument('-a', '--agent', type=str,
-                        default="Shartrash",
+                        default="Shartrash/1.0",
                         dest='agent', action='store',
                         help='change User-Agent header value')
     parser.add_argument('-n', '--no-keep-alive', default=False,
@@ -32,7 +34,7 @@ def create_args():
     parser.add_argument('-d', '--headers', type=str, dest='headers',
                         action='store', help='''add user headers to request 
                         from <HEADERS> file''')
-    parser.add_argument('-c', '--host', type=str, default=None, dest='host',
+    parser.add_argument('-c', '--host', type=str, dest='host',
                         action='store', help='''specifies custom host for 
                         request''')
     parser.add_argument('-m', '--method', type=str, dest='method',
@@ -55,35 +57,47 @@ def main():
     parsed_line = u.parse_url(args.url)
 
     if not parsed_line['host']:
-        print(f'Url "{args.url}" is not valid\n')
+        print(f'Url "{args.url}" is not valid')
         sys.exit(URL_NOT_VALID)
 
     if parsed_line['proto'] not in ('http', 'https'):
-        print(f'Protocol "{parsed_line["proto"]}" is not supported :(\n',
+        print(f'Protocol "{parsed_line["proto"]}" is not supported',
               file=sys.stderr)
         sys.exit(NOT_SUPPORTED_PROTO)
 
     net = network.Network(parsed_line['host'], parsed_line['proto'],
                           parsed_line['port'], args)
 
-    if net.try_connect_to_host():
+    try:
+        net.connect_to_host()
         net.send_request(parsed_line["path"])
-    else:
-        print(f'Could not connect to host "{parsed_line["host"]}"\n',
+    except socket.gaierror:
+        print(f'Could not connect to host "{parsed_line["host"]}"',
               file=sys.stderr)
         sys.exit(CONNECTION_ERROR)
+    except TimeoutError:
+        print(f'Connecting timed out', file=sys.stderr)
+        sys.exit(TIMEOUT_ERROR)
 
     try:
         result = net.recv_response()
     except TimeoutError:
-        print('Receive timed out\n', file=sys.stderr)
+        print('Receiving timed out', file=sys.stderr)
         sys.exit(TIMEOUT_ERROR)
-    except OSError:
-        print('Unable to write file\n', file=sys.stderr)
-        sys.exit(FILE_ERROR)
-    except network.NonSuccessfulResponse as e:
-        print(f"Response wasn't successful: {e}", file=sys.stderr)
+    except e.NonSuccessfulResponse as err:
+        print(f"Response wasn't successful: {err}", file=sys.stderr)
         sys.exit(net.response_code)
+    except e.ProtocolError as err:
+        print(f'Protocol "{err}" is not supported :(',
+              file=sys.stderr)
+        sys.exit(NOT_SUPPORTED_PROTO)
+    except socket.gaierror as err:
+        print(err,
+              file=sys.stderr)
+        sys.exit(CONNECTION_ERROR)
+    except OSError:
+        print('Unable to write file', file=sys.stderr)
+        sys.exit(FILE_ERROR)
 
     if not args.output:
         print(result)
