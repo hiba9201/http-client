@@ -7,7 +7,6 @@ from logic import errors as e
 from logic import network
 from logic import utils as u
 
-
 URL_NOT_VALID = 1
 NOT_SUPPORTED_PROTO = 2
 CONNECTION_ERROR = 3
@@ -17,7 +16,7 @@ FILE_ERROR = 5
 
 def create_args():
     parser = argparse.ArgumentParser(description='''Python3.7 implementation of 
-                                     http client. Read "README.md" for more 
+                                     http client. Read "README.md" for more
                                      information''')
     parser.add_argument('url', type=str, help='Url for request')
     parser.add_argument('-a', '--agent', type=str,
@@ -32,14 +31,14 @@ def create_args():
                         action='store',
                         help='load image to <LOAD> file if got one')
     parser.add_argument('-d', '--headers', type=str, dest='headers',
-                        action='store', help='''add user headers to request 
+                        action='store', help='''add user headers to request
                         from <HEADERS> file''')
     parser.add_argument('-c', '--host', type=str, dest='host',
-                        action='store', help='''specifies custom host for 
+                        action='store', help='''specifies custom host for
                         request''')
     parser.add_argument('-m', '--method', type=str, dest='method',
                         action='store', default='GET',
-                        help='''request method, GET by default 
+                        help='''request method, GET by default
                         (others are not implemented)''')
     parser.add_argument('-r', '--no-redirects', action='store_true',
                         default=False, dest='no_redirects',
@@ -88,7 +87,7 @@ def main():
         print(f"Response wasn't successful: {err}", file=sys.stderr)
         sys.exit(net.response_code)
     except e.ProtocolError as err:
-        print(f'Protocol "{err}" is not supported :(',
+        print(f'Protocol "{err}" is not supported',
               file=sys.stderr)
         sys.exit(NOT_SUPPORTED_PROTO)
     except socket.gaierror as err:
